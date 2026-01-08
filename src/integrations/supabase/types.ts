@@ -14,16 +14,266 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      attendance: {
+        Row: {
+          clock_in: string
+          clock_out: string | null
+          created_at: string | null
+          date: string
+          employee_id: string | null
+          hours_worked: number | null
+          id: string
+        }
+        Insert: {
+          clock_in?: string
+          clock_out?: string | null
+          created_at?: string | null
+          date?: string
+          employee_id?: string | null
+          hours_worked?: number | null
+          id?: string
+        }
+        Update: {
+          clock_in?: string
+          clock_out?: string | null
+          created_at?: string | null
+          date?: string
+          employee_id?: string | null
+          hours_worked?: number | null
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attendance_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      expenses: {
+        Row: {
+          amount: number
+          category: Database["public"]["Enums"]["expense_category_type"]
+          created_at: string | null
+          date: string
+          description: string
+          id: string
+          paid: boolean | null
+          recurring: boolean | null
+        }
+        Insert: {
+          amount: number
+          category: Database["public"]["Enums"]["expense_category_type"]
+          created_at?: string | null
+          date?: string
+          description: string
+          id?: string
+          paid?: boolean | null
+          recurring?: boolean | null
+        }
+        Update: {
+          amount?: number
+          category?: Database["public"]["Enums"]["expense_category_type"]
+          created_at?: string | null
+          date?: string
+          description?: string
+          id?: string
+          paid?: boolean | null
+          recurring?: boolean | null
+        }
+        Relationships: []
+      }
+      products: {
+        Row: {
+          barcode: string | null
+          category: string
+          cost_price: number | null
+          created_at: string | null
+          id: string
+          name: string
+          price: number
+          sku: string | null
+          stock: number
+          updated_at: string | null
+        }
+        Insert: {
+          barcode?: string | null
+          category: string
+          cost_price?: number | null
+          created_at?: string | null
+          id?: string
+          name: string
+          price: number
+          sku?: string | null
+          stock?: number
+          updated_at?: string | null
+        }
+        Update: {
+          barcode?: string | null
+          category?: string
+          cost_price?: number | null
+          created_at?: string | null
+          id?: string
+          name?: string
+          price?: number
+          sku?: string | null
+          stock?: number
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string | null
+          email: string
+          full_name: string
+          id: string
+          role: Database["public"]["Enums"]["employee_role_type"] | null
+        }
+        Insert: {
+          created_at?: string | null
+          email: string
+          full_name: string
+          id: string
+          role?: Database["public"]["Enums"]["employee_role_type"] | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string
+          full_name?: string
+          id?: string
+          role?: Database["public"]["Enums"]["employee_role_type"] | null
+        }
+        Relationships: []
+      }
+      sale_items: {
+        Row: {
+          created_at: string | null
+          id: string
+          price_at_sale: number
+          product_id: string | null
+          quantity: number
+          sale_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          price_at_sale: number
+          product_id?: string | null
+          quantity: number
+          sale_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          price_at_sale?: number
+          product_id?: string | null
+          quantity?: number
+          sale_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sale_items_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sale_items_sale_id_fkey"
+            columns: ["sale_id"]
+            isOneToOne: false
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sales: {
+        Row: {
+          cart_id: string | null
+          created_at: string | null
+          employee_id: string | null
+          id: string
+          payment_method: Database["public"]["Enums"]["payment_method_type"]
+          tax: number
+          total: number
+        }
+        Insert: {
+          cart_id?: string | null
+          created_at?: string | null
+          employee_id?: string | null
+          id?: string
+          payment_method: Database["public"]["Enums"]["payment_method_type"]
+          tax?: number
+          total: number
+        }
+        Update: {
+          cart_id?: string | null
+          created_at?: string | null
+          employee_id?: string | null
+          id?: string
+          payment_method?: Database["public"]["Enums"]["payment_method_type"]
+          tax?: number
+          total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "manager" | "cashier"
+      employee_role_type: "admin" | "cashier" | "manager"
+      expense_category_type:
+        | "rent"
+        | "utilities"
+        | "internet"
+        | "salaries"
+        | "inventory"
+        | "maintenance"
+        | "other"
+      payment_method_type: "cash" | "credit_card" | "debit_card"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +400,19 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "manager", "cashier"],
+      employee_role_type: ["admin", "cashier", "manager"],
+      expense_category_type: [
+        "rent",
+        "utilities",
+        "internet",
+        "salaries",
+        "inventory",
+        "maintenance",
+        "other",
+      ],
+      payment_method_type: ["cash", "credit_card", "debit_card"],
+    },
   },
 } as const
