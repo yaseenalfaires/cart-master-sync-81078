@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Plus, Edit, Trash2, Printer } from "lucide-react";
+import { Plus, Edit, Trash2, Printer, Upload, X } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/formatting";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import JsBarcode from "jsbarcode";
@@ -21,6 +21,8 @@ interface Product {
   category: string;
   barcode: string;
   sku: string;
+  color: string;
+  image_url: string | null;
 }
 
 const Products = () => {
@@ -29,6 +31,10 @@ const Products = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [printQuantity, setPrintQuantity] = useState(1);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     name: "",
     cost_price: "",
@@ -37,6 +43,7 @@ const Products = () => {
     category: "",
     barcode: "",
     sku: "",
+    color: "",
   });
 
   useEffect(() => {
@@ -56,11 +63,54 @@ const Products = () => {
     }
   };
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const clearImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const uploadImage = async (productId: string): Promise<string | null> => {
+    if (!imageFile) return null;
+
+    const fileExt = imageFile.name.split('.').pop();
+    const fileName = `${productId}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('product-images')
+      .upload(filePath, imageFile, { upsert: true });
+
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      throw uploadError;
+    }
+
+    const { data } = supabase.storage
+      .from('product-images')
+      .getPublicUrl(filePath);
+
+    return data.publicUrl;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validate form data
-    if (!formData.name || !formData.selling_price || !formData.stock || !formData.category) {
+    if (!formData.name || !formData.selling_price || !formData.stock || !formData.category || !formData.color) {
       toast.error("الرجاء ملء جميع الحقول المطلوبة");
       return;
     }
@@ -84,6 +134,8 @@ const Products = () => {
       return;
     }
 
+    setUploading(true);
+
     const productData = {
       name: formData.name,
       price: sellingPrice,
@@ -92,13 +144,20 @@ const Products = () => {
       category: formData.category,
       barcode: formData.barcode || null,
       sku: formData.sku || null,
+      color: formData.color,
     };
 
     try {
       if (editingProduct) {
+        let imageUrl = editingProduct.image_url;
+        
+        if (imageFile) {
+          imageUrl = await uploadImage(editingProduct.id);
+        }
+
         const { error } = await supabase
           .from("products")
-          .update(productData)
+          .update({ ...productData, image_url: imageUrl })
           .eq("id", editingProduct.id);
 
         if (error) {
@@ -120,6 +179,17 @@ const Products = () => {
           console.error("Insert error:", error);
           toast.error(`فشل في إنشاء المنتج: ${error.message}`);
         } else {
+          // Upload image if provided
+          if (imageFile && newProduct) {
+            const imageUrl = await uploadImage(newProduct.id);
+            if (imageUrl) {
+              await supabase
+                .from("products")
+                .update({ image_url: imageUrl })
+                .eq("id", newProduct.id);
+            }
+          }
+
           toast.success("تم إنشاء المنتج بنجاح");
           
           // Print price tags if quantity is specified and product has barcode
@@ -134,6 +204,8 @@ const Products = () => {
     } catch (err) {
       console.error("Submit error:", err);
       toast.error("حدث خطأ غير متوقع");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -147,7 +219,9 @@ const Products = () => {
       category: product.category,
       barcode: product.barcode || "",
       sku: product.sku || "",
+      color: product.color,
     });
+    setImagePreview(product.image_url);
     setIsDialogOpen(true);
   };
 
@@ -176,8 +250,14 @@ const Products = () => {
       category: "",
       barcode: "",
       sku: "",
+      color: "",
     });
     setPrintQuantity(1);
+    setImageFile(null);
+    setImagePreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
     setEditingProduct(null);
     setIsDialogOpen(false);
   };
@@ -346,6 +426,16 @@ const Products = () => {
                   required
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="color">اللون *</Label>
+                <Input
+                  id="color"
+                  value={formData.color}
+                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                  placeholder="مثال: أحمر، أزرق، أسود"
+                  required
+                />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="barcode">الباركود</Label>
@@ -364,6 +454,43 @@ const Products = () => {
                   />
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label>صورة المنتج</Label>
+                <div className="flex items-center gap-4">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="hidden"
+                    id="image-upload"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload className="w-4 h-4 ml-2" />
+                    اختر صورة
+                  </Button>
+                  {imagePreview && (
+                    <div className="relative">
+                      <img
+                        src={imagePreview}
+                        alt="معاينة"
+                        className="w-16 h-16 object-cover rounded border"
+                      />
+                      <button
+                        type="button"
+                        onClick={clearImage}
+                        className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
               {!editingProduct && (
                 <div className="space-y-2">
                   <Label htmlFor="printQuantity">عدد الملصقات للطباعة</Label>
@@ -377,11 +504,11 @@ const Products = () => {
                 </div>
               )}
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={resetForm}>
+                <Button type="button" variant="outline" onClick={resetForm} disabled={uploading}>
                   إلغاء
                 </Button>
-                <Button type="submit">
-                  {editingProduct ? "تحديث" : "إنشاء"}
+                <Button type="submit" disabled={uploading}>
+                  {uploading ? "جاري الحفظ..." : editingProduct ? "تحديث" : "إنشاء"}
                 </Button>
               </div>
             </form>
@@ -397,7 +524,9 @@ const Products = () => {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>الصورة</TableHead>
                 <TableHead>الاسم</TableHead>
+                <TableHead>اللون</TableHead>
                 <TableHead>الفئة</TableHead>
                 <TableHead>سعر التكلفة</TableHead>
                 <TableHead>سعر البيع</TableHead>
@@ -410,7 +539,21 @@ const Products = () => {
             <TableBody>
               {products.map((product) => (
                 <TableRow key={product.id}>
+                  <TableCell>
+                    {product.image_url ? (
+                      <img
+                        src={product.image_url}
+                        alt={product.name}
+                        className="w-12 h-12 object-cover rounded"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 bg-muted rounded flex items-center justify-center text-muted-foreground text-xs">
+                        لا صورة
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell className="font-medium">{product.name}</TableCell>
+                  <TableCell>{product.color}</TableCell>
                   <TableCell>{product.category}</TableCell>
                   <TableCell>{product.cost_price ? formatCurrency(product.cost_price, currency) : "-"}</TableCell>
                   <TableCell>{formatCurrency(product.price, currency)}</TableCell>
