@@ -16,6 +16,7 @@ interface Product {
   id: string;
   name: string;
   price: number;
+  cost_price: number | null;
   stock: number;
   category: string;
   barcode: string;
@@ -30,7 +31,8 @@ const Products = () => {
   const [printQuantity, setPrintQuantity] = useState(1);
   const [formData, setFormData] = useState({
     name: "",
-    price: "",
+    cost_price: "",
+    selling_price: "",
     stock: "",
     category: "",
     barcode: "",
@@ -58,16 +60,22 @@ const Products = () => {
     e.preventDefault();
 
     // Validate form data
-    if (!formData.name || !formData.price || !formData.stock || !formData.category) {
+    if (!formData.name || !formData.selling_price || !formData.stock || !formData.category) {
       toast.error("الرجاء ملء جميع الحقول المطلوبة");
       return;
     }
 
-    const price = parseFloat(formData.price);
+    const sellingPrice = parseFloat(formData.selling_price);
+    const costPrice = formData.cost_price ? parseFloat(formData.cost_price) : null;
     const stock = parseInt(formData.stock);
 
-    if (isNaN(price) || price <= 0) {
-      toast.error("الرجاء إدخال سعر صحيح");
+    if (isNaN(sellingPrice) || sellingPrice <= 0) {
+      toast.error("الرجاء إدخال سعر بيع صحيح");
+      return;
+    }
+
+    if (costPrice !== null && (isNaN(costPrice) || costPrice < 0)) {
+      toast.error("الرجاء إدخال سعر تكلفة صحيح");
       return;
     }
 
@@ -78,7 +86,8 @@ const Products = () => {
 
     const productData = {
       name: formData.name,
-      price: price,
+      price: sellingPrice,
+      cost_price: costPrice,
       stock: stock,
       category: formData.category,
       barcode: formData.barcode || null,
@@ -132,7 +141,8 @@ const Products = () => {
     setEditingProduct(product);
     setFormData({
       name: product.name,
-      price: product.price.toString(),
+      cost_price: product.cost_price?.toString() || "",
+      selling_price: product.price.toString(),
       stock: product.stock.toString(),
       category: product.category,
       barcode: product.barcode || "",
@@ -160,7 +170,8 @@ const Products = () => {
   const resetForm = () => {
     setFormData({
       name: "",
-      price: "",
+      cost_price: "",
+      selling_price: "",
       stock: "",
       category: "",
       barcode: "",
@@ -294,26 +305,37 @@ const Products = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="price">السعر</Label>
+                  <Label htmlFor="cost_price">سعر التكلفة</Label>
                   <Input
-                    id="price"
+                    id="cost_price"
                     type="number"
                     step="0.01"
-                    value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                    required
+                    value={formData.cost_price}
+                    onChange={(e) => setFormData({ ...formData, cost_price: e.target.value })}
+                    placeholder="اختياري"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="stock">المخزون</Label>
+                  <Label htmlFor="selling_price">سعر البيع</Label>
                   <Input
-                    id="stock"
+                    id="selling_price"
                     type="number"
-                    value={formData.stock}
-                    onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                    step="0.01"
+                    value={formData.selling_price}
+                    onChange={(e) => setFormData({ ...formData, selling_price: e.target.value })}
                     required
                   />
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="stock">المخزون</Label>
+                <Input
+                  id="stock"
+                  type="number"
+                  value={formData.stock}
+                  onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                  required
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="category">الفئة</Label>
@@ -377,7 +399,8 @@ const Products = () => {
               <TableRow>
                 <TableHead>الاسم</TableHead>
                 <TableHead>الفئة</TableHead>
-                <TableHead>السعر</TableHead>
+                <TableHead>سعر التكلفة</TableHead>
+                <TableHead>سعر البيع</TableHead>
                 <TableHead>المخزون</TableHead>
                 <TableHead>الباركود</TableHead>
                 <TableHead>رمز المنتج</TableHead>
@@ -389,6 +412,7 @@ const Products = () => {
                 <TableRow key={product.id}>
                   <TableCell className="font-medium">{product.name}</TableCell>
                   <TableCell>{product.category}</TableCell>
+                  <TableCell>{product.cost_price ? formatCurrency(product.cost_price, currency) : "-"}</TableCell>
                   <TableCell>{formatCurrency(product.price, currency)}</TableCell>
                   <TableCell>
                     <span className={product.stock < 10 ? "text-destructive font-semibold" : ""}>
