@@ -1,0 +1,28 @@
+-- Add color column (required) and image_url column to products
+ALTER TABLE public.products
+ADD COLUMN color text NOT NULL DEFAULT 'أسود',
+ADD COLUMN image_url text;
+
+-- Remove the default after adding the column
+ALTER TABLE public.products ALTER COLUMN color DROP DEFAULT;
+
+-- Create storage bucket for product images
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('product-images', 'product-images', true);
+
+-- Create storage policies for product images
+CREATE POLICY "Anyone can view product images"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'product-images');
+
+CREATE POLICY "Authenticated users can upload product images"
+ON storage.objects FOR INSERT
+WITH CHECK (bucket_id = 'product-images' AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Authenticated users can update product images"
+ON storage.objects FOR UPDATE
+USING (bucket_id = 'product-images' AND auth.uid() IS NOT NULL);
+
+CREATE POLICY "Authenticated users can delete product images"
+ON storage.objects FOR DELETE
+USING (bucket_id = 'product-images' AND auth.uid() IS NOT NULL);
