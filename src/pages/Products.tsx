@@ -6,11 +6,19 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, Printer, Upload, X } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/formatting";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import JsBarcode from "jsbarcode";
+
+interface ProductSize {
+  id: string;
+  product_id: string;
+  size: string;
+  quantity: number;
+}
 
 interface Product {
   id: string;
@@ -23,7 +31,35 @@ interface Product {
   sku: string;
   color: string;
   image_url: string | null;
+  sizes?: ProductSize[];
 }
+
+// Size options based on category
+const SIZE_OPTIONS: Record<string, string[]> = {
+  "tshirts": ["S", "M", "L", "XL", "XXL"],
+  "shirts": ["S", "M", "L", "XL", "XXL"],
+  "sweatpants": ["S", "M", "L", "XL", "XXL"],
+  "jeans": ["29", "30", "31", "32", "33", "34", "35", "36", "37", "38"],
+  "jean_shorts": ["29", "30", "31", "32", "33", "34", "35", "36", "37", "38"],
+  "jumpsuits": ["XL", "XXL", "3XL", "4XL"],
+  "boxers": ["M", "L", "XL", "XXL"],
+  "tanks": ["M", "L", "XL", "XXL"],
+  "sneakers": ["40", "41", "42", "43", "44", "45"],
+  "shoes": ["40", "41", "42", "43", "44", "45"],
+};
+
+const CATEGORY_OPTIONS = [
+  { value: "tshirts", label: "تيشرتات" },
+  { value: "shirts", label: "قمصان" },
+  { value: "sweatpants", label: "بناطيل رياضية" },
+  { value: "jeans", label: "جينز" },
+  { value: "jean_shorts", label: "شورت جينز" },
+  { value: "jumpsuits", label: "جمبسوت" },
+  { value: "boxers", label: "بوكسرات" },
+  { value: "tanks", label: "فانلات" },
+  { value: "sneakers", label: "سنيكرز" },
+  { value: "shoes", label: "أحذية" },
+];
 
 const Products = () => {
   const { currency } = useCurrency();
@@ -35,11 +71,11 @@ const Products = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [sizeQuantities, setSizeQuantities] = useState<Record<string, number>>({});
   const [formData, setFormData] = useState({
     name: "",
     cost_price: "",
     selling_price: "",
-    stock: "",
     category: "",
     barcode: "",
     sku: "",
@@ -51,16 +87,32 @@ const Products = () => {
   }, []);
 
   const fetchProducts = async () => {
-    const { data, error } = await supabase
+    const { data: productsData, error: productsError } = await supabase
       .from("products")
       .select("*")
       .order("name");
 
-    if (error) {
+    if (productsError) {
       toast.error("فشل في جلب المنتجات");
-    } else {
-      setProducts(data || []);
+      return;
     }
+
+    // Fetch sizes for all products
+    const { data: sizesData, error: sizesError } = await supabase
+      .from("product_sizes")
+      .select("*");
+
+    if (sizesError) {
+      console.error("Failed to fetch sizes:", sizesError);
+    }
+
+    // Map sizes to products
+    const productsWithSizes = (productsData || []).map(product => ({
+      ...product,
+      sizes: (sizesData || []).filter(size => size.product_id === product.id)
+    }));
+
+    setProducts(productsWithSizes);
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,18 +158,33 @@ const Products = () => {
     return data.publicUrl;
   };
 
+  const handleCategoryChange = (category: string) => {
+    setFormData({ ...formData, category });
+    // Reset size quantities when category changes
+    const sizes = SIZE_OPTIONS[category] || [];
+    const newSizeQuantities: Record<string, number> = {};
+    sizes.forEach(size => {
+      newSizeQuantities[size] = 0;
+    });
+    setSizeQuantities(newSizeQuantities);
+  };
+
+  const calculateTotalStock = () => {
+    return Object.values(sizeQuantities).reduce((sum, qty) => sum + qty, 0);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Validate form data
-    if (!formData.name || !formData.selling_price || !formData.stock || !formData.category || !formData.color) {
+    if (!formData.name || !formData.selling_price || !formData.category || !formData.color) {
       toast.error("الرجاء ملء جميع الحقول المطلوبة");
       return;
     }
 
     const sellingPrice = parseFloat(formData.selling_price);
     const costPrice = formData.cost_price ? parseFloat(formData.cost_price) : null;
-    const stock = parseInt(formData.stock);
+    const totalStock = calculateTotalStock();
 
     if (isNaN(sellingPrice) || sellingPrice <= 0) {
       toast.error("الرجاء إدخال سعر بيع صحيح");
@@ -129,18 +196,13 @@ const Products = () => {
       return;
     }
 
-    if (isNaN(stock) || stock < 0) {
-      toast.error("الرجاء إدخال كمية مخزون صحيحة");
-      return;
-    }
-
     setUploading(true);
 
     const productData = {
       name: formData.name,
       price: sellingPrice,
       cost_price: costPrice,
-      stock: stock,
+      stock: totalStock,
       category: formData.category,
       barcode: formData.barcode || null,
       sku: formData.sku || null,
@@ -164,6 +226,8 @@ const Products = () => {
           console.error("Update error:", error);
           toast.error(`فشل في تحديث المنتج: ${error.message}`);
         } else {
+          // Update product sizes
+          await updateProductSizes(editingProduct.id);
           toast.success("تم تحديث المنتج بنجاح");
           resetForm();
           fetchProducts();
@@ -190,11 +254,14 @@ const Products = () => {
             }
           }
 
+          // Create product sizes
+          await createProductSizes(newProduct.id);
+
           toast.success("تم إنشاء المنتج بنجاح");
           
           // Print price tags if quantity is specified and product has barcode
           if (printQuantity > 0 && newProduct.barcode) {
-            printPriceTag(newProduct, printQuantity);
+            printPriceTag({ ...newProduct, sizes: [] }, printQuantity);
           }
           
           resetForm();
@@ -209,18 +276,65 @@ const Products = () => {
     }
   };
 
+  const createProductSizes = async (productId: string) => {
+    const sizesToInsert = Object.entries(sizeQuantities)
+      .filter(([, qty]) => qty > 0)
+      .map(([size, quantity]) => ({
+        product_id: productId,
+        size,
+        quantity,
+      }));
+
+    if (sizesToInsert.length > 0) {
+      const { error } = await supabase
+        .from("product_sizes")
+        .insert(sizesToInsert);
+
+      if (error) {
+        console.error("Error creating sizes:", error);
+      }
+    }
+  };
+
+  const updateProductSizes = async (productId: string) => {
+    // Delete existing sizes
+    await supabase
+      .from("product_sizes")
+      .delete()
+      .eq("product_id", productId);
+
+    // Create new sizes
+    await createProductSizes(productId);
+
+    // Update total stock on product
+    const totalStock = calculateTotalStock();
+    await supabase
+      .from("products")
+      .update({ stock: totalStock })
+      .eq("id", productId);
+  };
+
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
     setFormData({
       name: product.name,
       cost_price: product.cost_price?.toString() || "",
       selling_price: product.price.toString(),
-      stock: product.stock.toString(),
       category: product.category,
       barcode: product.barcode || "",
       sku: product.sku || "",
       color: product.color,
     });
+    
+    // Populate size quantities
+    const sizes = SIZE_OPTIONS[product.category] || [];
+    const newSizeQuantities: Record<string, number> = {};
+    sizes.forEach(size => {
+      const existingSize = product.sizes?.find(s => s.size === size);
+      newSizeQuantities[size] = existingSize?.quantity || 0;
+    });
+    setSizeQuantities(newSizeQuantities);
+    
     setImagePreview(product.image_url);
     setIsDialogOpen(true);
   };
@@ -246,12 +360,12 @@ const Products = () => {
       name: "",
       cost_price: "",
       selling_price: "",
-      stock: "",
       category: "",
       barcode: "",
       sku: "",
       color: "",
     });
+    setSizeQuantities({});
     setPrintQuantity(1);
     setImageFile(null);
     setImagePreview(null);
@@ -353,6 +467,22 @@ const Products = () => {
     }
   };
 
+  const getCategoryLabel = (value: string) => {
+    return CATEGORY_OPTIONS.find(c => c.value === value)?.label || value;
+  };
+
+  const getSizesDisplay = (product: Product) => {
+    if (!product.sizes || product.sizes.length === 0) {
+      return "-";
+    }
+    return product.sizes
+      .filter(s => s.quantity > 0)
+      .map(s => `${s.size}: ${s.quantity}`)
+      .join(" | ");
+  };
+
+  const availableSizes = SIZE_OPTIONS[formData.category] || [];
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -367,7 +497,7 @@ const Products = () => {
               إضافة منتج
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {editingProduct ? "تعديل المنتج" : "إضافة منتج جديد"}
@@ -408,23 +538,19 @@ const Products = () => {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="stock">المخزون</Label>
-                <Input
-                  id="stock"
-                  type="number"
-                  value={formData.stock}
-                  onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="category">الفئة</Label>
-                <Input
-                  id="category"
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                  required
-                />
+                <Label htmlFor="category">الفئة *</Label>
+                <Select value={formData.category} onValueChange={handleCategoryChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر الفئة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATEGORY_OPTIONS.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="color">اللون *</Label>
@@ -436,6 +562,33 @@ const Products = () => {
                   required
                 />
               </div>
+              
+              {availableSizes.length > 0 && (
+                <div className="space-y-2">
+                  <Label>المقاسات والكميات</Label>
+                  <div className="grid grid-cols-5 gap-2 p-4 border rounded-lg bg-muted/30">
+                    {availableSizes.map(size => (
+                      <div key={size} className="flex flex-col items-center gap-1">
+                        <span className="text-sm font-medium">{size}</span>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={sizeQuantities[size] || 0}
+                          onChange={(e) => setSizeQuantities({
+                            ...sizeQuantities,
+                            [size]: parseInt(e.target.value) || 0
+                          })}
+                          className="w-16 text-center"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    إجمالي المخزون: {calculateTotalStock()}
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="barcode">الباركود</Label>
@@ -528,11 +681,11 @@ const Products = () => {
                 <TableHead>الاسم</TableHead>
                 <TableHead>اللون</TableHead>
                 <TableHead>الفئة</TableHead>
+                <TableHead>المقاسات</TableHead>
                 <TableHead>سعر التكلفة</TableHead>
                 <TableHead>سعر البيع</TableHead>
-                <TableHead>المخزون</TableHead>
+                <TableHead>إجمالي المخزون</TableHead>
                 <TableHead>الباركود</TableHead>
-                <TableHead>رمز المنتج</TableHead>
                 <TableHead className="text-left">الإجراءات</TableHead>
               </TableRow>
             </TableHeader>
@@ -554,7 +707,10 @@ const Products = () => {
                   </TableCell>
                   <TableCell className="font-medium">{product.name}</TableCell>
                   <TableCell>{product.color}</TableCell>
-                  <TableCell>{product.category}</TableCell>
+                  <TableCell>{getCategoryLabel(product.category)}</TableCell>
+                  <TableCell className="max-w-[200px] text-sm">
+                    {getSizesDisplay(product)}
+                  </TableCell>
                   <TableCell>{product.cost_price ? formatCurrency(product.cost_price, currency) : "-"}</TableCell>
                   <TableCell>{formatCurrency(product.price, currency)}</TableCell>
                   <TableCell>
@@ -563,7 +719,6 @@ const Products = () => {
                     </span>
                   </TableCell>
                   <TableCell>{product.barcode || "-"}</TableCell>
-                  <TableCell>{product.sku || "-"}</TableCell>
                   <TableCell className="text-left">
                     <div className="flex justify-start gap-2">
                       <Button

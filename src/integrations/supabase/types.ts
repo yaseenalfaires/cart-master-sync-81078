@@ -85,6 +85,41 @@ export type Database = {
         }
         Relationships: []
       }
+      product_sizes: {
+        Row: {
+          created_at: string
+          id: string
+          product_id: string
+          quantity: number
+          size: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          product_id: string
+          quantity?: number
+          size: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          product_id?: string
+          quantity?: number
+          size?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_sizes_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       products: {
         Row: {
           barcode: string | null
@@ -162,6 +197,7 @@ export type Database = {
           product_id: string | null
           quantity: number
           sale_id: string | null
+          size: string | null
         }
         Insert: {
           created_at?: string | null
@@ -170,6 +206,7 @@ export type Database = {
           product_id?: string | null
           quantity: number
           sale_id?: string | null
+          size?: string | null
         }
         Update: {
           created_at?: string | null
@@ -178,6 +215,7 @@ export type Database = {
           product_id?: string | null
           quantity?: number
           sale_id?: string | null
+          size?: string | null
         }
         Relationships: [
           {

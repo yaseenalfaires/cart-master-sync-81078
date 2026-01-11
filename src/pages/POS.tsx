@@ -4,10 +4,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Scan, Plus, Minus, Trash2, CreditCard, Wallet, Printer } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/formatting";
 import { useCurrency } from "@/contexts/CurrencyContext";
+
+interface ProductSize {
+  id: string;
+  product_id: string;
+  size: string;
+  quantity: number;
+}
 
 interface Product {
   id: string;
@@ -15,10 +24,15 @@ interface Product {
   price: number;
   stock: number;
   barcode: string;
+  category: string;
+  color: string;
+  sizes?: ProductSize[];
 }
 
 interface CartItem extends Product {
   quantity: number;
+  selectedSize: string;
+  sizeId: string;
 }
 
 const POS = () => {
@@ -29,22 +43,43 @@ const POS = () => {
   const [barcodeInput, setBarcodeInput] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "credit_card" | "debit_card">("cash");
   const [loading, setLoading] = useState(false);
+  
+  // Size selection dialog
+  const [sizeDialogOpen, setSizeDialogOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedSize, setSelectedSize] = useState<string>("");
 
   useEffect(() => {
     fetchProducts();
   }, []);
 
   const fetchProducts = async () => {
-    const { data, error } = await supabase
+    const { data: productsData, error: productsError } = await supabase
       .from("products")
       .select("*")
       .order("name");
 
-    if (error) {
+    if (productsError) {
       toast.error("فشل في جلب المنتجات");
-    } else {
-      setProducts(data || []);
+      return;
     }
+
+    // Fetch sizes for all products
+    const { data: sizesData, error: sizesError } = await supabase
+      .from("product_sizes")
+      .select("*");
+
+    if (sizesError) {
+      console.error("Failed to fetch sizes:", sizesError);
+    }
+
+    // Map sizes to products
+    const productsWithSizes = (productsData || []).map(product => ({
+      ...product,
+      sizes: (sizesData || []).filter(size => size.product_id === product.id)
+    }));
+
+    setProducts(productsWithSizes);
   };
 
   const handleBarcodeSearch = async () => {
@@ -52,21 +87,37 @@ const POS = () => {
 
     const product = products.find(p => p.barcode === barcodeInput);
     if (product) {
-      addToCart(product);
+      handleProductClick(product);
       setBarcodeInput("");
-      toast.success(`تمت إضافة ${product.name} إلى السلة`);
     } else {
       toast.error("المنتج غير موجود");
     }
   };
 
-  const addToCart = (product: Product) => {
-    const existingItem = cart.find(item => item.id === product.id);
+  const handleProductClick = (product: Product) => {
+    if (product.sizes && product.sizes.length > 0) {
+      // Product has sizes, show size selection dialog
+      const availableSizes = product.sizes.filter(s => s.quantity > 0);
+      if (availableSizes.length === 0) {
+        toast.error("المنتج غير متوفر في المخزون");
+        return;
+      }
+      setSelectedProduct(product);
+      setSelectedSize("");
+      setSizeDialogOpen(true);
+    } else {
+      // Product doesn't have sizes, add directly
+      addToCartWithoutSize(product);
+    }
+  };
+
+  const addToCartWithoutSize = (product: Product) => {
+    const existingItem = cart.find(item => item.id === product.id && !item.selectedSize);
     
     if (existingItem) {
       if (existingItem.quantity < product.stock) {
         setCart(cart.map(item =>
-          item.id === product.id
+          item.id === product.id && !item.selectedSize
             ? { ...item, quantity: item.quantity + 1 }
             : item
         ));
@@ -75,21 +126,73 @@ const POS = () => {
       }
     } else {
       if (product.stock > 0) {
-        setCart([...cart, { ...product, quantity: 1 }]);
+        setCart([...cart, { ...product, quantity: 1, selectedSize: "", sizeId: "" }]);
       } else {
         toast.error("المنتج غير متوفر في المخزون");
       }
     }
   };
 
-  const updateQuantity = (productId: string, change: number) => {
+  const addToCartWithSize = () => {
+    if (!selectedProduct || !selectedSize) {
+      toast.error("الرجاء اختيار المقاس");
+      return;
+    }
+
+    const sizeInfo = selectedProduct.sizes?.find(s => s.size === selectedSize);
+    if (!sizeInfo || sizeInfo.quantity <= 0) {
+      toast.error("المقاس غير متوفر");
+      return;
+    }
+
+    const cartKey = `${selectedProduct.id}-${selectedSize}`;
+    const existingItem = cart.find(item => `${item.id}-${item.selectedSize}` === cartKey);
+
+    if (existingItem) {
+      if (existingItem.quantity < sizeInfo.quantity) {
+        setCart(cart.map(item =>
+          `${item.id}-${item.selectedSize}` === cartKey
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        ));
+      } else {
+        toast.error("المخزون غير كافي لهذا المقاس");
+      }
+    } else {
+      setCart([...cart, { 
+        ...selectedProduct, 
+        quantity: 1, 
+        selectedSize: selectedSize,
+        sizeId: sizeInfo.id
+      }]);
+    }
+
+    setSizeDialogOpen(false);
+    setSelectedProduct(null);
+    setSelectedSize("");
+    toast.success(`تمت إضافة ${selectedProduct.name} (${selectedSize}) إلى السلة`);
+  };
+
+  const updateQuantity = (cartKey: string, change: number) => {
     setCart(cart.map(item => {
-      if (item.id === productId) {
+      const itemKey = item.selectedSize ? `${item.id}-${item.selectedSize}` : item.id;
+      if (itemKey === cartKey) {
         const newQuantity = item.quantity + change;
         if (newQuantity <= 0) {
           return item;
         }
-        if (newQuantity > item.stock) {
+        
+        // Check stock limit
+        let maxStock: number;
+        if (item.selectedSize && item.sizeId) {
+          const product = products.find(p => p.id === item.id);
+          const sizeInfo = product?.sizes?.find(s => s.size === item.selectedSize);
+          maxStock = sizeInfo?.quantity || 0;
+        } else {
+          maxStock = item.stock;
+        }
+        
+        if (newQuantity > maxStock) {
           toast.error("المخزون غير كافي");
           return item;
         }
@@ -99,8 +202,11 @@ const POS = () => {
     }).filter(item => item.quantity > 0));
   };
 
-  const removeFromCart = (productId: string) => {
-    setCart(cart.filter(item => item.id !== productId));
+  const removeFromCart = (cartKey: string) => {
+    setCart(cart.filter(item => {
+      const itemKey = item.selectedSize ? `${item.id}-${item.selectedSize}` : item.id;
+      return itemKey !== cartKey;
+    }));
   };
 
   const calculateTotal = () => {
@@ -132,6 +238,7 @@ const POS = () => {
             <thead>
               <tr>
                 <th>المنتج</th>
+                <th>المقاس</th>
                 <th>السعر</th>
                 <th>الكمية</th>
                 <th>الإجمالي</th>
@@ -141,6 +248,7 @@ const POS = () => {
               ${cart.map(item => `
                 <tr>
                   <td>${item.name}</td>
+                  <td>${item.selectedSize || "-"}</td>
                   <td>${formatCurrency(item.price, currency)}</td>
                   <td>${item.quantity}</td>
                   <td>${formatCurrency(item.price * item.quantity, currency)}</td>
@@ -197,23 +305,55 @@ const POS = () => {
           product_id: item.id,
           quantity: item.quantity,
           price_at_sale: item.price,
+          size: item.selectedSize || null,
         });
 
-        // Get current stock from database and decrement it
-        const { data: currentProduct, error: fetchError } = await supabase
-          .from("products")
-          .select("stock")
-          .eq("id", item.id)
-          .single();
+        if (item.selectedSize && item.sizeId) {
+          // Update size quantity
+          const { data: currentSize, error: fetchError } = await supabase
+            .from("product_sizes")
+            .select("quantity")
+            .eq("id", item.sizeId)
+            .single();
 
-        if (fetchError) throw fetchError;
+          if (fetchError) throw fetchError;
 
-        const newStock = (currentProduct?.stock || 0) - item.quantity;
-        
-        await supabase
-          .from("products")
-          .update({ stock: Math.max(0, newStock) })
-          .eq("id", item.id);
+          const newQuantity = Math.max(0, (currentSize?.quantity || 0) - item.quantity);
+          
+          await supabase
+            .from("product_sizes")
+            .update({ quantity: newQuantity })
+            .eq("id", item.sizeId);
+
+          // Update total product stock
+          const { data: allSizes } = await supabase
+            .from("product_sizes")
+            .select("quantity")
+            .eq("product_id", item.id);
+
+          const totalStock = (allSizes || []).reduce((sum, s) => sum + s.quantity, 0) - item.quantity;
+          
+          await supabase
+            .from("products")
+            .update({ stock: Math.max(0, totalStock) })
+            .eq("id", item.id);
+        } else {
+          // No size, update product stock directly
+          const { data: currentProduct, error: fetchError } = await supabase
+            .from("products")
+            .select("stock")
+            .eq("id", item.id)
+            .single();
+
+          if (fetchError) throw fetchError;
+
+          const newStock = (currentProduct?.stock || 0) - item.quantity;
+          
+          await supabase
+            .from("products")
+            .update({ stock: Math.max(0, newStock) })
+            .eq("id", item.id);
+        }
       }
 
       toast.success(`تمت عملية البيع! الإجمالي: ${formatCurrency(total, currency)}`);
@@ -237,6 +377,10 @@ const POS = () => {
   );
 
   const { total } = calculateTotal();
+
+  const getAvailableSizes = (product: Product) => {
+    return product.sizes?.filter(s => s.quantity > 0) || [];
+  };
 
   return (
     <div className="space-y-6">
@@ -279,18 +423,37 @@ const POS = () => {
                 className="mb-4"
               />
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
-                {filteredProducts.map((product) => (
-                  <Button
-                    key={product.id}
-                    variant="outline"
-                    className="h-auto flex-col p-4 text-right"
-                    onClick={() => addToCart(product)}
-                  >
-                    <span className="font-semibold">{product.name}</span>
-                    <span className="text-sm text-muted-foreground">{formatCurrency(product.price, currency)}</span>
-                    <span className="text-xs text-muted-foreground">المخزون: {formatNumber(product.stock, 0)}</span>
-                  </Button>
-                ))}
+                {filteredProducts.map((product) => {
+                  const availableSizes = getAvailableSizes(product);
+                  const hasStock = product.sizes && product.sizes.length > 0 
+                    ? availableSizes.length > 0 
+                    : product.stock > 0;
+                  
+                  return (
+                    <Button
+                      key={product.id}
+                      variant="outline"
+                      className="h-auto flex-col p-4 text-right"
+                      onClick={() => handleProductClick(product)}
+                      disabled={!hasStock}
+                    >
+                      <span className="font-semibold">{product.name}</span>
+                      <span className="text-xs text-muted-foreground">{product.color}</span>
+                      <span className="text-sm text-muted-foreground">{formatCurrency(product.price, currency)}</span>
+                      {product.sizes && product.sizes.length > 0 ? (
+                        <span className="text-xs text-muted-foreground">
+                          {availableSizes.length > 0 
+                            ? `${availableSizes.length} مقاسات متوفرة`
+                            : "غير متوفر"}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          المخزون: {formatNumber(product.stock, 0)}
+                        </span>
+                      )}
+                    </Button>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -304,40 +467,46 @@ const POS = () => {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2 max-h-64 overflow-y-auto">
-                {cart.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-2 border rounded-lg">
-                    <div className="flex-1">
-                      <p className="font-medium text-sm">{item.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatCurrency(item.price, currency)} × {formatNumber(item.quantity, 0)}
-                      </p>
+                {cart.map((item) => {
+                  const cartKey = item.selectedSize ? `${item.id}-${item.selectedSize}` : item.id;
+                  return (
+                    <div key={cartKey} className="flex items-center justify-between p-2 border rounded-lg">
+                      <div className="flex-1">
+                        <p className="font-medium text-sm">{item.name}</p>
+                        {item.selectedSize && (
+                          <p className="text-xs text-primary">المقاس: {item.selectedSize}</p>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          {formatCurrency(item.price, currency)} × {formatNumber(item.quantity, 0)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => updateQuantity(cartKey, -1)}
+                        >
+                          <Minus className="w-3 h-3" />
+                        </Button>
+                        <span className="w-8 text-center">{item.quantity}</span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => updateQuantity(cartKey, 1)}
+                        >
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => removeFromCart(cartKey)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => updateQuantity(item.id, -1)}
-                      >
-                        <Minus className="w-3 h-3" />
-                      </Button>
-                      <span className="w-8 text-center">{item.quantity}</span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => updateQuantity(item.id, 1)}
-                      >
-                        <Plus className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => removeFromCart(item.id)}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="border-t pt-4 space-y-2">
@@ -389,6 +558,49 @@ const POS = () => {
           </Card>
         </div>
       </div>
+
+      {/* Size Selection Dialog */}
+      <Dialog open={sizeDialogOpen} onOpenChange={setSizeDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>اختر المقاس</DialogTitle>
+          </DialogHeader>
+          {selectedProduct && (
+            <div className="space-y-4">
+              <div>
+                <p className="font-medium">{selectedProduct.name}</p>
+                <p className="text-sm text-muted-foreground">{selectedProduct.color}</p>
+                <p className="text-sm">{formatCurrency(selectedProduct.price, currency)}</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">المقاس</label>
+                <Select value={selectedSize} onValueChange={setSelectedSize}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="اختر المقاس" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedProduct.sizes
+                      ?.filter(s => s.quantity > 0)
+                      .map(size => (
+                        <SelectItem key={size.id} value={size.size}>
+                          {size.size} (متوفر: {size.quantity})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setSizeDialogOpen(false)}>
+                  إلغاء
+                </Button>
+                <Button onClick={addToCartWithSize} disabled={!selectedSize}>
+                  إضافة للسلة
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
